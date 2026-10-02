@@ -30,6 +30,8 @@ ALLOWED = {".wav", ".mp3", ".m4a", ".aac", ".ogg", ".flac", ".wma",
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 500 * 1024 * 1024  # 500 MB per batch
 
+VERSION = "1.0.1"
+
 # ---------------------------------------------------------------- styles/pages
 
 PAGE_CSS = """
@@ -39,6 +41,14 @@ h1{font-size:28px;margin-bottom:4px} .sub{color:#666;margin-bottom:28px}
 button,.btn{background:#111;color:#fff;border:0;border-radius:8px;padding:12px 28px;font-size:16px;cursor:pointer;text-decoration:none;display:inline-block}
 button:disabled{opacity:.4;cursor:wait}
 .note{color:#777;font-size:13px;margin-top:24px;line-height:1.6}
+.quitbtn{background:none !important;border:1px solid #ccc !important;color:#999 !important;padding:8px 20px !important;font-size:13px !important;border-radius:8px;cursor:pointer}
+.ver{color:#bbb;font-size:11px;margin-top:18px;text-align:center}
+"""
+
+QUIT_FORM = """
+<form method="post" action="/quit" style="margin-top:30px;text-align:center">
+<button type="submit" class="quitbtn">⏻ Quit CleanTake</button>
+</form>
 """
 
 INDEX_HTML = """
@@ -84,6 +94,8 @@ INDEX_HTML = """
 <div class="note">Supported: mp3, wav, m4a, ogg, flac, mp4, mov, webm…<br>
 Pipeline: DeepFilterNet noise removal → loudness leveling to −16 LUFS. Replaces Descript Studio Sound / Krisp / Auphonic — for $0.<br><br>
 <i>Best for steady background noise (fan, hum, room tone). Can't separate overlapping voices, e.g. café chatter.</i></div>
+""" + QUIT_FORM + """
+<div class="ver">CleanTake v""" + VERSION + """ · 100% local</div>
 <script>
 const drop=document.getElementById('drop'),inp=document.getElementById('file'),
       go=document.getElementById('go'),f=document.getElementById('f'),
@@ -169,6 +181,20 @@ audio,video{width:100%} .ok{color:#1a7f37;font-weight:600} .bad{color:#b42318;fo
 {% endfor %}
 <br><a href="/">← Clean more files</a>
 <div class="note"><i>Best for steady background noise (fan, hum, room tone). Can't separate overlapping voices, e.g. café chatter.</i></div>
+""" + QUIT_FORM + """
+</body></html>
+"""
+
+QUIT_HTML = """
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>CleanTake — quit</title>
+<style>""" + PAGE_CSS + """</style></head><body>
+<h1>👋 CleanTake đã tắt</h1>
+<div class="sub">CleanTake has quit. You can safely close this tab.</div>
+<div class="card">Mở lại bằng cách nhấp đúp <b>CleanTake.exe</b>.<br>
+<span style="color:#666">To run again, double-click <b>CleanTake.exe</b>.</span></div>
 </body></html>
 """
 
@@ -341,10 +367,65 @@ def download(tok):
                      download_name=f"{base}{ext}")
 
 
+@app.route("/quit", methods=["POST"])
+def quit_app():
+    """Shut the whole app down (the only clean exit once the console is hidden).
+
+    Werkzeug 3.x removed werkzeug.server.shutdown, so we answer first and then
+    kill the process from a daemon thread — the OS frees the port for us.
+    """
+    def _halt():
+        time.sleep(0.8)  # let the quit page flush to the browser
+        os._exit(0)
+
+    threading.Thread(target=_halt, daemon=True).start()
+    return render_template_string(QUIT_HTML)
+
+
+HOST, PORT = "127.0.0.1", 5057
+
+
+def _port_free():
+    import socket
+    s = socket.socket()
+    try:
+        s.bind((HOST, PORT))
+        return True
+    except OSError:
+        return False
+    finally:
+        s.close()
+
+
+def _alert(title, text):
+    """Native message box on Windows (there is no console in windowed mode)."""
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            ctypes.windll.user32.MessageBoxW(0, text, title, 0x30)  # MB_ICONWARNING
+        except Exception:
+            pass
+    else:
+        print(f"{title}: {text}", file=sys.stderr)
+
+
 if __name__ == "__main__":
-    url = "http://127.0.0.1:5057"
-    print(f"CleanTake running at {url}  (local only)")
-    # Open the browser only for the packaged app (PyInstaller), never in dev.
-    if getattr(sys, "frozen", False):
-        webbrowser.open(url)
-    app.run(host="127.0.0.1", port=5057, debug=False)
+    url = f"http://{HOST}:{PORT}"
+    try:
+        if not _port_free():
+            _alert("CleanTake",
+                   "CleanTake is already running.\n\n"
+                   "Please quit the other copy first (use the \u201cQuit "
+                   "CleanTake\u201d button on its web page), then start "
+                   "CleanTake again.")
+            sys.exit(1)
+        print(f"CleanTake v{VERSION} running at {url}  (local only)")
+        # Open the browser only for the packaged app (PyInstaller), never in dev.
+        if getattr(sys, "frozen", False):
+            webbrowser.open(url)
+        app.run(host=HOST, port=PORT, debug=False)
+    except OSError as e:
+        _alert("CleanTake",
+               f"CleanTake could not start.\n\n{e}\n\n"
+               "The network port may be in use by another program.")
+        sys.exit(1)

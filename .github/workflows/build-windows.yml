@@ -119,13 +119,16 @@ jobs:
           }
 
       # ------------------------------------------------------------------
-      # d. PyInstaller bundle (onedir). --console kept on purpose: the console
-      #    window shows status and closing it quits the app (v1 decision).
+      # d. PyInstaller bundle (onedir). --windowed hides the console (v1.0.1):
+      #    no black terminal window on launch. Startup failures surface via a
+      #    native Windows message box (see _alert in app.py), and the web UI
+      #    has a "Quit CleanTake" button as the clean shutdown path — closing
+      #    the browser tab alone does NOT stop the app.
       #    The two exes are bundled at the dist root next to CleanTake.exe.
       # ------------------------------------------------------------------
       - name: PyInstaller bundle
         run: |
-          pyinstaller --noconfirm --clean --onedir --console --name CleanTake `
+          pyinstaller --noconfirm --clean --onedir --windowed --name CleanTake `
             --add-data "ffmpeg.exe;." `
             --add-data "deep_filter.exe;." `
             app.py

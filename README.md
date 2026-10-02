@@ -48,7 +48,7 @@ Requirements: Python 3.10+, `ffmpeg` on PATH. The DeepFilterNet binary (`bin/dee
 
 ## Windows build
 
-Push a tag like `v1.0.0` → GitHub Actions builds the Windows package automatically
+Push a tag like `v1.0.1` → GitHub Actions builds the Windows package automatically
 (portable ZIP + `setup.exe`, built with PyInstaller). Grab it from the release page.
 
 > **"Windows protected your PC" (SmartScreen)?** This is expected — the build is
