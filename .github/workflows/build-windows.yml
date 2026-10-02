@@ -1,0 +1,169 @@
+# CleanTake Windows build — runs on windows-latest (PyInstaller cannot cross-compile from Linux).
+# Trigger: push a tag like v1.0.0 -> builds setup EXE + portable ZIP -> publishes GitHub Release.
+name: Build Windows
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+
+    steps:
+      # ------------------------------------------------------------------
+      # a. Fail-fast: check both binary URLs BEFORE building anything.
+      #    ffmpeg has no fallback -> dead URL fails the job immediately.
+      #    deep_filter has a Rust-source fallback -> only flags it.
+      # ------------------------------------------------------------------
+      - name: Fail-fast URL check
+        id: urls
+        run: |
+          $ErrorActionPreference = "Stop"
+          $deepFilterUrl = "https://github.com/Rikorose/DeepFilterNet/releases/download/v0.5.6/deep-filter-0.5.6-x86_64-pc-windows-msvc.exe"
+          $ffmpegUrl      = "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip"
+
+          function Test-Url($name, $url) {
+            $code = & curl.exe -sSL --max-time 90 -o NUL -w "%{http_code}" $url 2>$null
+            $ok = ($LASTEXITCODE -eq 0) -and ($code -match '^[23]\d\d$')
+            if ($ok) { Write-Host "$name OK (HTTP $code)" }
+            else     { Write-Host "::error::$name URL DEAD (HTTP $code): $url" }
+            return $ok
+          }
+
+          $dfOk = Test-Url "deep_filter" $deepFilterUrl
+          $ffOk = Test-Url "ffmpeg"      $ffmpegUrl
+
+          if (-not $ffOk) {
+            Write-Host "::error::ffmpeg download URL is dead and there is no fallback for it. Failing fast instead of building blind."
+            exit 1
+          }
+          if (-not $dfOk) {
+            Write-Host "::warning::deep_filter prebuilt URL is dead - will try the Rust-source fallback build."
+          }
+          Add-Content $env:GITHUB_OUTPUT "deep_filter_ok=$($dfOk.ToString().ToLower())"
+
+      # ------------------------------------------------------------------
+      # b. Checkout + Python 3.12 + deps
+      # ------------------------------------------------------------------
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Python deps + PyInstaller
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller
+
+      # ------------------------------------------------------------------
+      # c. Binaries: ffmpeg (download only) + deep_filter (download, else Rust fallback)
+      #    Both land in the repo root as ffmpeg.exe / deep_filter.exe.
+      # ------------------------------------------------------------------
+      - name: Download ffmpeg
+        run: |
+          $ErrorActionPreference = "Stop"
+          curl.exe -sSL --max-time 600 -o ffmpeg.zip "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip"
+          if ($LASTEXITCODE -ne 0) { throw "ffmpeg download failed (curl exit $LASTEXITCODE)" }
+          Expand-Archive -Path ffmpeg.zip -DestinationPath ffdir
+          $exe = Get-ChildItem -Path ffdir -Recurse -Filter ffmpeg.exe | Select-Object -First 1
+          if (-not $exe) { throw "ffmpeg.exe not found inside the downloaded zip" }
+          Copy-Item $exe.FullName -Destination .\ffmpeg.exe
+          Remove-Item -Recurse -Force ffdir, ffmpeg.zip
+
+      - name: Download deep_filter (prebuilt)
+        if: steps.urls.outputs.deep_filter_ok == 'true'
+        run: |
+          $ErrorActionPreference = "Stop"
+          curl.exe -sSL --max-time 600 -o deep_filter.exe "https://github.com/Rikorose/DeepFilterNet/releases/download/v0.5.6/deep-filter-0.5.6-x86_64-pc-windows-msvc.exe"
+          if ($LASTEXITCODE -ne 0) { throw "deep_filter download failed (curl exit $LASTEXITCODE)" }
+
+      - name: Fallback - build deep_filter from Rust source
+        if: steps.urls.outputs.deep_filter_ok != 'true'
+        run: |
+          $ErrorActionPreference = "Stop"
+          Write-Host "::warning::Prebuilt deep_filter URL is dead - building from Rust source (best effort)."
+          if (-not (Get-Command cargo -ErrorAction SilentlyContinue)) {
+            throw "cargo not found on this runner, so the Rust fallback cannot run either. Aborting."
+          }
+          # Same binary the upstream project ships: package deep_filter, bin deep-filter,
+          # features bin,tract,wav-utils,transforms,default-model (model embedded in the exe).
+          # NOTE: upstream CI also enables use-jemalloc, but that dep is cfg(not(windows)),
+          # so it is intentionally dropped here to keep the Windows build resolvable.
+          git clone --depth 1 --branch v0.5.6 https://github.com/Rikorose/DeepFilterNet.git df-src
+          Push-Location df-src
+          cargo build --release --features bin,tract,wav-utils,transforms,default-model -p deep_filter --bin deep-filter --target x86_64-pc-windows-msvc
+          Pop-Location
+          $built = "df-src\target\x86_64-pc-windows-msvc\release\deep-filter.exe"
+          if (-not (Test-Path $built)) {
+            throw "Rust fallback failed: prebuilt URL was dead AND no deep-filter.exe was produced at $built. Aborting."
+          }
+          Copy-Item $built -Destination .\deep_filter.exe
+
+      - name: Verify binaries
+        run: |
+          $ErrorActionPreference = "Stop"
+          foreach ($f in @("ffmpeg.exe", "deep_filter.exe")) {
+            if (-not (Test-Path $f)) { throw "$f is missing - cannot bundle it into the app." }
+            Write-Host "$f present: $((Get-Item $f).Length) bytes"
+          }
+
+      # ------------------------------------------------------------------
+      # d. PyInstaller bundle (onedir). --console kept on purpose: the console
+      #    window shows status and closing it quits the app (v1 decision).
+      #    The two exes are bundled at the dist root next to CleanTake.exe.
+      # ------------------------------------------------------------------
+      - name: PyInstaller bundle
+        run: |
+          pyinstaller --noconfirm --clean --onedir --console --name CleanTake `
+            --add-data "ffmpeg.exe;." `
+            --add-data "deep_filter.exe;." `
+            app.py
+
+      # ------------------------------------------------------------------
+      # e. Inno Setup installer (version comes from the tag, e.g. v1.0.0 -> 1.0.0)
+      # ------------------------------------------------------------------
+      - name: Install Inno Setup
+        run: choco install innosetup -y --no-progress
+
+      - name: Compile installer
+        run: |
+          $ErrorActionPreference = "Stop"
+          $version = $env:GITHUB_REF -replace '^refs/tags/v', ''
+          if (-not $version) { throw "Could not derive version from GITHUB_REF=$env:GITHUB_REF" }
+          Add-Content $env:GITHUB_ENV "CLEANTAKE_VERSION=$version"
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { throw "ISCC.exe not found at $iscc - Inno Setup install may have failed." }
+          & $iscc "installer.iss" "/dMyAppVersion=$version"
+          if ($LASTEXITCODE -ne 0) { throw "Inno Setup compile failed (exit $LASTEXITCODE)" }
+
+      # ------------------------------------------------------------------
+      # f. Portable ZIP of dist\CleanTake
+      # ------------------------------------------------------------------
+      - name: Build portable ZIP
+        run: |
+          $ErrorActionPreference = "Stop"
+          Compress-Archive -Path "dist\CleanTake" -DestinationPath "CleanTake-Portable-$env:CLEANTAKE_VERSION.zip"
+
+      # ------------------------------------------------------------------
+      # g. Publish both artifacts to the tag's GitHub Release
+      # ------------------------------------------------------------------
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: CleanTake ${{ github.ref_name }}
+          generate_release_notes: true
+          files: |
+            Output/CleanTake-Setup-${{ env.CLEANTAKE_VERSION }}.exe
+            CleanTake-Portable-${{ env.CLEANTAKE_VERSION }}.zip
