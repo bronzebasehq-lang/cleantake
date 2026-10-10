@@ -1,0 +1,107 @@
+# CleanTake Pro Windows build — runs on windows-latest (PyInstaller cannot cross-compile from Linux).
+# Trigger: push a tag like pro-v1.0.0 -> builds CleanTake-Pro portable ZIP
+# -> uploads it as a workflow artifact (NOT a public GitHub Release;
+# the paid release is published manually after testing).
+name: Build Windows Pro
+
+on:
+  push:
+    tags:
+      - "pro-v*"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+
+    steps:
+      - name: Fail-fast URL check
+        run: |
+          $ErrorActionPreference = "Stop"
+          $deepFilterUrl = "https://github.com/Rikorose/DeepFilterNet/releases/download/v0.5.6/deep-filter-0.5.6-x86_64-pc-windows-msvc.exe"
+          $ffmpegUrl      = "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip"
+          function Test-Url($name, $url) {
+            $code = & curl.exe -sSL --max-time 90 -o NUL -w "%{http_code}" $url 2>$null
+            $ok = ($LASTEXITCODE -eq 0) -and ($code -match '^[23]\d\d$')
+            if (-not $ok) { Write-Host "::error::$name URL DEAD (HTTP $code): $url" }
+            return $ok
+          }
+          if (-not (Test-Url "ffmpeg" $ffmpegUrl)) { exit 1 }
+          if (-not (Test-Url "deep_filter" $deepFilterUrl)) { exit 1 }
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Python deps + PyInstaller
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller
+
+      - name: Download ffmpeg
+        run: |
+          $ErrorActionPreference = "Stop"
+          curl.exe -sSL --max-time 600 -o ffmpeg.zip "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip"
+          if ($LASTEXITCODE -ne 0) { throw "ffmpeg download failed (curl exit $LASTEXITCODE)" }
+          Expand-Archive -Path ffmpeg.zip -DestinationPath ffdir
+          $exe = Get-ChildItem -Path ffdir -Recurse -Filter ffmpeg.exe | Select-Object -First 1
+          if (-not $exe) { throw "ffmpeg.exe not found inside the downloaded zip" }
+          Copy-Item $exe.FullName -Destination .\ffmpeg.exe
+          Remove-Item -Recurse -Force ffdir, ffmpeg.zip
+
+      - name: Download deep_filter (prebuilt)
+        run: |
+          $ErrorActionPreference = "Stop"
+          curl.exe -sSL --max-time 600 -o deep_filter.exe "https://github.com/Rikorose/DeepFilterNet/releases/download/v0.5.6/deep-filter-0.5.6-x86_64-pc-windows-msvc.exe"
+          if ($LASTEXITCODE -ne 0) { throw "deep_filter download failed (curl exit $LASTEXITCODE)" }
+
+      - name: Verify binaries
+        run: |
+          $ErrorActionPreference = "Stop"
+          foreach ($f in @("ffmpeg.exe", "deep_filter.exe")) {
+            if (-not (Test-Path $f)) { throw "$f is missing - cannot bundle it into the app." }
+            Write-Host "$f present: $((Get-Item $f).Length) bytes"
+          }
+          if (Test-Path "license.key") { throw "license.key must NOT be bundled into the shipped build." }
+
+      - name: PyInstaller bundle (CleanTake-Pro, windowed)
+        run: |
+          pyinstaller --noconfirm --clean --onedir --windowed --name CleanTake-Pro `
+            --add-data "ffmpeg.exe;." `
+            --add-data "deep_filter.exe;." `
+            cleantake_pro.py
+
+      - name: Sanity check bundle
+        run: |
+          $ErrorActionPreference = "Stop"
+          foreach ($f in @("dist\CleanTake-Pro\CleanTake-Pro.exe",
+                           "dist\CleanTake-Pro\ffmpeg.exe",
+                           "dist\CleanTake-Pro\deep_filter.exe")) {
+            if (-not (Test-Path $f)) { throw "$f missing from bundle." }
+            Write-Host "$f OK"
+          }
+          if (Test-Path "dist\CleanTake-Pro\license.key") { throw "license.key leaked into the bundle!" }
+          Write-Host "No license.key in bundle - good (user pastes their own key on first run)."
+
+      - name: Build portable ZIP
+        run: |
+          $ErrorActionPreference = "Stop"
+          $version = $env:GITHUB_REF -replace '^refs/tags/pro-v', ''
+          if (-not $version) { throw "Could not derive version from GITHUB_REF=$env:GITHUB_REF" }
+          Compress-Archive -Path "dist\CleanTake-Pro" -DestinationPath "CleanTake-Pro-Portable-$version.zip"
+
+      - name: Upload portable ZIP as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: CleanTake-Pro-Portable
+          path: CleanTake-Pro-Portable-*.zip
+          retention-days: 30
