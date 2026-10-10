@@ -51,7 +51,7 @@ RECHECK_INTERVAL = 24 * 3600  # re-validate an LS key at most once a day
 # Product scoping (docs recommend hard-coding these so a key bought for some
 # other Lemon Squeezy product can't unlock CleanTake). Fill in once the
 # Lemon Squeezy product exists; while None the scope check is skipped.
-LS_STORE_ID = None  # TODO: fill from LS dashboard Settings
+LS_STORE_ID = 494255
 LS_PRODUCT_ID = 1427924
 LS_VARIANT_ID = 2230163
 
