@@ -64,8 +64,20 @@ def ffmpeg_bin():
     return resolve_binary("ffmpeg")
 
 
+def _win_no_window():
+    """On Windows, keep ffmpeg/deep_filter from flashing a black console
+    window on every processing step."""
+    if sys.platform == "win32":
+        si = subprocess.STARTUPINFO()
+        si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        return {"startupinfo": si,
+                "creationflags": subprocess.CREATE_NO_WINDOW}
+    return {}
+
+
 def _run(cmd):
-    p = subprocess.run(cmd, capture_output=True, text=True)
+    p = subprocess.run(cmd, capture_output=True, text=True,
+                       **_win_no_window())
     if p.returncode != 0:
         raise RuntimeError(f"Command failed: {' '.join(cmd)}\n{p.stderr[-2000:]}")
     return p
