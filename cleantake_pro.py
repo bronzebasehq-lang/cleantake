@@ -29,7 +29,7 @@ from flask import Flask, request, send_file, render_template_string, redirect
 
 from pipeline import PRESETS
 from pipeline_pro import LOUDNESS_PRESETS, process_file_pro
-from license import is_licensed, activate_key
+from license import is_licensed, activate_key, clear_saved_key
 
 BASE = os.path.dirname(os.path.abspath(__file__))
 UPLOADS = os.path.join(BASE, "pro_uploads")
@@ -43,7 +43,7 @@ ALLOWED = {".wav", ".mp3", ".m4a", ".aac", ".ogg", ".flac", ".wma",
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 500 * 1024 * 1024  # 500 MB per batch
 
-VERSION = "1.0.0"
+VERSION = "1.0.5"
 WATCH_STATE_FILE = os.path.join(OUTPUTS, "watch_state.json")
 
 # ---------------------------------------------------------------- styles/pages
@@ -170,7 +170,7 @@ automatically with the settings above, into <b>CleanTake-Pro-Output</b> inside i
 Pipeline: DeepFilterNet → silence trim → loudness preset.<br><br>
 <i>Best for steady background noise (fan, hum, room tone). Can't separate overlapping voices, e.g. café chatter.</i></div>
 """ + QUIT_FORM + """
-<div class="ver">CleanTake Pro v""" + VERSION + """ · 100% local</div>
+<div class="ver">CleanTake Pro v""" + VERSION + """ · 100% local · <a href="#" onclick="event.preventDefault();fetch('/license/deactivate',{method:'POST'}).then(()=>location.href='/license')">change license key</a></div>
 <script>
 const drop=document.getElementById('drop'),inp=document.getElementById('file'),
       go=document.getElementById('go'),f=document.getElementById('f'),
@@ -431,6 +431,13 @@ def license_page():
         else:
             error = "Please enter your license key."
     return render_template_string(LICENSE_HTML, error=error)
+
+
+@app.route("/license/deactivate", methods=["POST"])
+def license_deactivate():
+    """Forget the saved key so a different one can be entered."""
+    clear_saved_key()
+    return redirect("/license")
 
 
 @app.route("/")
