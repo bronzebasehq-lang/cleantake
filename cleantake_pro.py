@@ -29,7 +29,7 @@ from flask import Flask, request, send_file, render_template_string, redirect
 
 from pipeline import PRESETS
 from pipeline_pro import LOUDNESS_PRESETS, process_file_pro
-from license import is_licensed, validate_key, save_key
+from license import is_licensed, activate_key
 
 BASE = os.path.dirname(os.path.abspath(__file__))
 UPLOADS = os.path.join(BASE, "pro_uploads")
@@ -77,17 +77,16 @@ LICENSE_HTML = """
 </style></head><body>
 <h1><img src="data:image/png;base64,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" width="40" height="40" style="border-radius:10px;vertical-align:-9px;margin-right:6px" alt="CleanTake logo">CleanTake <span class="pro-badge">PRO</span></h1>
 <div class="sub">Enter your license key to unlock the Pro features.<br>
-<span style="font-size:13px">Keys are issued after purchase. Format: CT-PRO-XXXX-XXXX.</span></div>
+<span style="font-size:13px">Keys are issued by Lemon Squeezy after purchase — paste the key from your receipt email. (Older CT-PRO-XXXX-XXXX keys also work.)</span></div>
 <div class="card">
 {% if error %}<div class="err">{{ error }}</div>{% endif %}
 <form method="post" action="/license">
-<input type="text" name="key" placeholder="CT-PRO-XXXX-XXXX" autocomplete="off"
+<input type="text" name="key" placeholder="paste your license key" autocomplete="off"
        style="font-family:monospace;font-size:18px;text-align:center;letter-spacing:2px">
 <div style="text-align:center;margin-top:14px"><button type="submit">Unlock Pro ✨</button></div>
 </form>
 </div>
-<div class="note">Your key is stored in <b>license.key</b> next to the app — 100% local,
-never sent anywhere. Lost your key? Re-download it from your purchase email.</div>
+<div class="note">Your key is stored in <b>license.key</b> next to the app. It is checked against Lemon Squeezy's license server when you enter it (and re-checked daily) — nothing else leaves your computer. Lost your key? Re-download it from your purchase email.</div>
 </body></html>
 """
 
@@ -423,11 +422,14 @@ def _license_gate():
 def license_page():
     error = ""
     if request.method == "POST":
-        key = (request.form.get("key") or "").strip().upper()
-        if validate_key(key):
-            save_key(key)
-            return redirect("/")
-        error = "That key doesn't look right — check it and try again. Format: CT-PRO-XXXX-XXXX."
+        key = (request.form.get("key") or "").strip()
+        if key:
+            ok, msg = activate_key(key)
+            if ok:
+                return redirect("/")
+            error = msg
+        else:
+            error = "Please enter your license key."
     return render_template_string(LICENSE_HTML, error=error)
 
 
