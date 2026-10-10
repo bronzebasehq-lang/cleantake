@@ -80,6 +80,17 @@ jobs:
             --add-data "deep_filter.exe;." `
             cleantake_pro.py
 
+      - name: Ensure helper exes in bundle
+        # Belt and suspenders: --add-data should already place these, but a
+        # missing helper here means a broken app, so copy explicitly.
+        run: |
+          $ErrorActionPreference = "Stop"
+          Copy-Item .\ffmpeg.exe -Destination dist\CleanTake-Pro\ffmpeg.exe -Force
+          Copy-Item .\deep_filter.exe -Destination dist\CleanTake-Pro\deep_filter.exe -Force
+          Write-Host "bundle contents:"
+          Get-ChildItem dist\CleanTake-Pro\*.exe | ForEach-Object {
+            Write-Host ("  " + $_.Name + ": " + $_.Length + " bytes") }
+
       - name: Sanity check bundle
         run: |
           $ErrorActionPreference = "Stop"
