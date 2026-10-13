@@ -3,9 +3,18 @@
 Local, open-source audio cleanup. Drop noisy recordings in → get clean audio out.
 Replaces Descript Studio Sound / Krisp / Auphonic — for $0, with **nothing ever uploaded anywhere**.
 
-## Features
+## v2.0.0 — Free Forever
+
+**Everything is free. No license key, no paywall, no checkout, no tiers.**
+v2.0.0 merged every feature from the old paid "Pro" build into the free app
+and deleted the license gate. What you download here is the whole thing.
+
+## Features (all included)
 
 - **Batch processing** — drop many files at once; they're cleaned one by one with a live progress page. One bad file never kills the batch.
+- **Watch-folder** — point at a folder; new files are processed automatically while the app stays open, into `CleanTake-Output` inside it.
+- **Silence trimming** — cuts silences longer than 0.7 s (adjustable), keeping 0.15 s of breathing room on each side so natural pauses aren't clipped.
+- **Loudness presets (1-click)** — Podcast (−16 LUFS) / YouTube (−14 LUFS) / Audiobook (−19 LUFS).
 - **3 cleanup presets** — Gentle / Balanced / Strong (see table below).
 - **Video support** — feed it an mp4/mov/webm… and get back either an MP3 of the clean audio, or the **same video with clean audio remuxed in** (video stream untouched, no re-encode).
 - **Before/after player** on the results page, per-file download, and one **"Download all (.zip)"** button.
@@ -17,7 +26,8 @@ Replaces Descript Studio Sound / Krisp / Auphonic — for $0, with **nothing eve
 audio/video file
   → ffmpeg: convert to 48 kHz mono wav (what DeepFilterNet expects)
   → DeepFilterNet (local binary): remove noise & reverb
-  → ffmpeg loudnorm: level to -16 LUFS (podcast standard)
+  → silence trim (optional): ffmpeg silencedetect
+  → ffmpeg loudnorm: level to your chosen LUFS preset
   → <name>_clean.mp3   (or <name>_clean.mp4 for video mode)
 ```
 
@@ -33,7 +43,7 @@ Noise floor measured as mean RMS over the same 6 silence gaps; speech energy ove
 | Strong | `--pf --pf-beta 0.05` | −64.8 dB | **−32.3 dB** | −15.7 dB |
 
 Speech energy is **identical across all presets** — even Strong doesn't eat the voice.
-Loudness is always leveled to −16 LUFS regardless of preset.
+Loudness is leveled to your chosen preset (default Podcast −16 LUFS).
 
 ## Run it
 
@@ -48,7 +58,7 @@ Requirements: Python 3.10+, `ffmpeg` on PATH. The DeepFilterNet binary (`bin/dee
 
 ## Windows build
 
-Push a tag like `v1.0.1` → GitHub Actions builds the Windows package automatically
+Push a tag like `v2.0.0` → GitHub Actions builds the Windows package automatically
 (portable ZIP + `setup.exe`, built with PyInstaller). Grab it from the release page.
 
 > **"Windows protected your PC" (SmartScreen)?** This is expected — the build is
@@ -60,6 +70,15 @@ Push a tag like `v1.0.1` → GitHub Actions builds the Windows package automatic
 > Still unsure? The full source is in this repo — build it yourself with
 > `pip install pyinstaller && pyinstaller --onefile app.py`.
 
+## Tests
+
+```bash
+venv/bin/python test_full.py
+```
+
+Verifies: batch of 3 files, silence trimming, all 3 loudness presets within ±1 LUFS,
+denoise noise floor, voice-energy preservation.
+
 ## Credits
 
 - [FFmpeg](https://ffmpeg.org) — LGPL v2.1
@@ -70,6 +89,6 @@ Push a tag like `v1.0.1` → GitHub Actions builds the Windows package automatic
 
 - **Best for steady background noise** (fan, hum, room tone). It **can't separate
   overlapping voices** — e.g. café chatter will stay chatter.
-- Single-pass loudnorm (good enough for voice; two-pass would be more precise).
+- Single-pass loudnorm in the free pipeline; the full pipeline uses dual-pass loudnorm for accuracy.
 - Uploaded files stay in `uploads/`/`outputs/` — no auto-cleanup yet.
 - UI is functional, not beautiful. Faceless by design.

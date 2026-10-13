@@ -1,7 +1,7 @@
 ; CleanTake Windows installer script (Inno Setup 6)
-; Built by GitHub Actions:  iscc installer.iss /dMyAppVersion=1.0.1
+; Built by GitHub Actions:  iscc installer.iss /dMyAppVersion=2.0.0
 ; Local test (needs dist\CleanTake from PyInstaller first):
-;   iscc installer.iss /dMyAppVersion=1.0.1
+;   iscc installer.iss /dMyAppVersion=2.0.0
 ;
 ; Notes:
 ; - PrivilegesRequired=lowest => per-user install, no admin prompt.
